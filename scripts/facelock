@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -e
+
+CMD="$1"
+USER="$2"
+SOCK="/run/facelock/facelock.sock"
+
+usage() {
+  echo "Usage:"
+  echo "  facelock enroll <username>"
+  echo "  facelock verify <username>"
+  echo "  facelock test <username>"
+  exit 1
+}
+
+[ -z "$CMD" ] || [ -z "$USER" ] && usage
+
+wait_socket() {
+  for i in {1..20}; do
+    [ -S "$SOCK" ] && return
+    sleep 0.25
+  done
+  echo "[!] facelock daemon not running"
+  exit 1
+}
+
+case "$CMD" in
+  enroll)
+    wait_socket
+    echo "[*] Capturing face"
+    printf '{"cmd":"enroll","user":"%s"}\n' "$USER" | nc -U "$SOCK"
+
+    echo "[*] Training model"
+    python3 /usr/share/facelock/train_lbph.py "$USER" --data-dir /var/lib/facelock
+
+    echo "[*] Creating embeddings"
+    python3 /usr/share/facelock/make_emb_bin_from_raw.py \
+      /var/lib/facelock/"$USER" \
+      /var/lib/facelock \
+      "$USER"
+
+    systemctl restart facelock
+    echo "[✓] Face updated"
+    ;;
+
+  verify)
+    wait_socket
+    printf '{"cmd":"auth","user":"%s"}\n' "$USER" | nc -U "$SOCK" | jq .
+    ;;
+
+  test)
+    pamtester facelock-test "$USER" authenticate
+    ;;
+
+  *)
+    usage
+    ;;
+esac
