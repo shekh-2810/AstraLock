@@ -1,0 +1,65 @@
+#pragma once
+
+#include <optional>
+#include <string>
+#include <vector>
+#include <opencv2/opencv.hpp>
+
+// -------------------------------------------------------------
+// SAFE FEATURE-DETECTION FOR OPENCV FACE MODULE
+// -------------------------------------------------------------
+// OpenCV sometimes defines HAVE_OPENCV_FACE in opencv_modules.hpp.
+// We avoid redefining it by only defining our own macro
+// FACELD_HAVE_OPENCV_FACE, leaving OpenCV macros untouched.
+
+#if __has_include(<opencv2/face.hpp>)
+#  include <opencv2/face.hpp>
+#  define FACELD_HAVE_OPENCV_FACE 1
+#else
+#  define FACELD_HAVE_OPENCV_FACE 0
+#endif
+// -------------------------------------------------------------
+
+namespace facelock {
+
+struct LBPHResult {
+    bool match;           // true if threshold passed
+    float score;          // lower = better
+    std::string best_sample; // filename or index
+};
+
+class LBPHWrapper {
+public:
+    LBPHWrapper() = default;
+    ~LBPHWrapper();
+
+    // Load user model from model_dir.
+    // Supports:
+    //   user.yml           (OpenCV LBPH)
+    //   user_lbph.npz      (NPZ fallback embeddings)
+    bool load(const std::string &user,
+              const std::string &model_dir = "data/models");
+
+    // Predict using CV_8U grayscale image crop.
+    // Internal resize / histogram generation handled automatically.
+    std::optional<LBPHResult> predict(const cv::Mat &gray_crop,
+                                      float threshold = 0.30f);
+
+    std::string backend() const { return backend_; }  // "yml" | "npz" | "none"
+
+private:
+    std::string backend_ = "none";
+
+#if FACELD_HAVE_OPENCV_FACE
+    cv::Ptr<cv::face::LBPHFaceRecognizer> cv_recog_;
+#else
+    void* cv_recog_ = nullptr;  // placeholder; no OpenCV face support
+#endif
+
+    // NPZ fallback storage
+    std::vector<std::vector<float>> embeddings_;  // N × D
+    std::vector<std::string> emb_names_;
+    size_t emb_dim_ = 0;
+};
+
+} // namespace facelock
