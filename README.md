@@ -36,7 +36,6 @@ It runs a local daemon that performs facial verification and integrates directly
                                    PAM (sudo / login / DM)
                                              │
                                              ▼
-
                                       pam_facelock.so
                                              │
                                              ▼
