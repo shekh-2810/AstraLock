@@ -13,7 +13,9 @@ apt update
 apt install -y \
   cmake ninja-build g++ \
   libpam0g-dev libaudit-dev \
-  libopencv-dev pkg-config \
+  libopencv-dev \
+  nlohmann-json3-dev \
+  pkg-config \
   python3 python3-opencv \
   socat pamtester jq
 
