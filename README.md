@@ -1,46 +1,53 @@
-<p align="center">
-  <img src="assets/banner.png" alt="AstraLock banner" />
-</p>
+# AstraLock 
 
-# Facelock (Astralock)
+**AstraLock** is a **Linux biometric authentication system** that enables **face-based login** through **PAM** and **systemd**, designed to be **offline, auditable, and hackable**, offering a native Linux alternative to projects like *Howdy* and closed platforms such as *Windows Hello* without cloud dependencies.
 
-**Facelock** is a Linux biometric authentication system using facial recognition,
-integrated with **PAM** and **systemd**.
+It runs a local daemon that performs facial verification and integrates directly with system authentication flows such as `sudo`, `login`, `display managers`, and `polkit`.
 
-It provides:
-- A long-running authentication daemon
-- A PAM module for system login
-- A CLI for enroll / verify / test
-- LBPH-based local face recognition (no cloud)
+<p align="center"> <img src="assets/banner.png" alt="AstraLock banner" /> </p>
 
----
+## What AstraLock Is
+
+- A system daemon that performs face verification
+
+- A PAM module (pam_facelock.so) for system authentication
+
+- A CLI tool for enrollment, verification, and testing
+
+- A local-only LBPH model (no cloud, no network)
+
+*No external services.*
+*No telemetry.*
+*No vendor lock-in.*
 
 ## Features
 
-- PAM authentication (`login`, `sudo`, `polkit`, display managers)
-- Offline, local face data
-- Systemd-managed daemon
-- Works with webcam via OpenCV
-- CLI utilities for users and admins
+- 🔐PAM authentication (`login`, `sudo`, `polkit`, `display managers`)
+- 🧠Offline facial recognition *(LBPH, OpenCV)*
+- ⚙️systemd-managed daemon lifecycle
+- 📷 Webcam support via OpenCV
+- 🧪Built-in testing via `pamtester`
+- Simple CLI for users and admins
 
 ---
 
 ## Architecture
+```bash 
+                                   PAM (sudo / login / DM)
+                                             │
+                                             ▼
 
-PAM → pam_facelock.so
-  
-  &#8595;
-
-facelockd (systemd)
-
-   ↓
-
-UNIX socket (/run/facelock/facelock.sock)
-
-  ↓
-
-Face model (/var/lib/facelock)
-
+                                      pam_facelock.so
+                                             │
+                                             ▼
+                                facelockd (systemd service)
+                                             │
+                                             ▼
+                         UNIX socket (/run/facelock/facelock.sock)
+                                             │
+                                             ▼
+                              Face models (/var/lib/facelock)
+```
 
 
 ---
@@ -49,9 +56,9 @@ Face model (/var/lib/facelock)
 
 | Distro        | Status |
 |---------------|--------|
-| Debian        | ✅ |
-| Ubuntu        | ✅ |
-| Kali Linux    | ✅ |
+| Debian        | ✅ Supported | 
+| Ubuntu        | ✅ Supported |
+| Kali Linux    | ✅ Supported |
 | Arch Linux    | ⚠️ (manual deps) |
 | Fedora        | ⚠️ (SELinux rules needed) |
 
@@ -75,9 +82,10 @@ sudo apt install -y \
 ## Instalation 
 
 ```bash
-git clone https://github.com/<yourname>/facelock.git
-cd facelock
+git clone https://github.com/shekh-2810/AstraLock.git
+cd AstraLock
 sudo scripts/install_facelock.sh <username>
+
 ```
 
 #### Example
@@ -87,13 +95,15 @@ sudo scripts/install_facelock.sh shekh-2810
 ```
 This will:
 
-- Build daemon + PAM module
+- Build and install the daemon
 
-- Install systemd service
+- Build and install the PAM module
 
-- Enroll the user
+- Install and enable the systemd service
 
-- Train the model
+- Enroll face samples
+
+- Train the local model
 
 - Verify PAM authentication
 --- 
@@ -104,15 +114,21 @@ This will:
 sudo facelock enroll <username>
 ```
 
-Replaces old samples and retrains model.
+- Replaces existing samples
 
+- Retrains the face model
+
+- Reloads the daemon
+  
 #### Verify Face (direct)
 ```bash
 sudo facelock verify <username>
 ```
 
 Returns JSON result from daemon.
-
+```bash
+{ "ok": true, "match": true }
+```
 
 #### Test PAM
 ```bash
@@ -121,11 +137,13 @@ sudo facelock test <username>
 
 Runs pamtester.
 
+Uses `pamtester` to validate PAM integration.
+
 ---
 
 ## Enabling PAM on System
 
-**⚠️ Do this carefully. Always keep a terminal open.**
+**⚠️ Proceed carefully. Always keep a root shell open.**
 
 - #### Enable for sudo
 
@@ -134,7 +152,7 @@ Edit:
 sudo nano /etc/pam.d/sudo
 ```
 
-Add above @include common-auth:
+Add above `@include common-auth`:
 ```bash
 auth sufficient pam_facelock.so
 ```
@@ -148,6 +166,7 @@ Add:
 ```bash
 auth sufficient pam_facelock.so
 ```
+
 
 - #### Enable for GUI (GDM / SDDM / LightDM)
   
@@ -174,6 +193,43 @@ Add:
 ```bash
 auth sufficient pam_facelock.so
 ```
+---
+
+## Project Status & Roadmap
+
+**AstraLock** is actively maintained and currently in *Version 1* (**v1**).
+
+#### This release focuses on:
+
+- Stability of the daemon and PAM integration
+
+- Reliable offline face recognition
+
+- Clean install / uninstall behavior
+
+- Deterministic authentication paths (no UI hacks)
+
+#### Future releases will focus on:
+
+- Improved low-light and angle handling
+
+- Faster recognition paths
+
+- Better camera abstraction
+
+- Hardening against edge-case PAM failures
+
+- Optional advanced models (still offline)
+
+### *AstraLock exists because existing solutions (notably Howdy) suffer from:*
+
+- Fragile camera handling
+
+- Inconsistent PAM behavior
+
+- Poor low-light performance
+
+- Limited extensibility for contributors
 
 ## Uninstall
 ```bash
@@ -192,13 +248,13 @@ sudo scripts/uninstall_facelock.sh
 
 ### **Security Notes**
 
-Face auth is sufficient
+- *Face authentication is sufficient, not exclusive*
 
-Password fallback remains
+- *Password fallback remains available*
 
-No biometric data leaves system
+- *No biometric data leaves system*
 
-Models stored locally
+- *Models stored locally*
 
 ### Development
 **Build only**
@@ -213,16 +269,17 @@ rm -rf build build-pam
 
 ## **Disclaimer**
 
-This is biometric authentication software.
+**Biometric authentication is inherently probabilistic.**
 
-Always keep a fallback login method.
+Do **not** rely on face authentication as your only recovery method.
 
+Always keep an alternative login path available.
 
 ### License
 
-MIT (project code)
+- AstraLock: MIT
 
-cnpy retains its own license
+- cnpy: Retains its original license
 
 
 
