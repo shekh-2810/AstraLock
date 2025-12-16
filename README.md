@@ -68,10 +68,11 @@ It runs a local daemon that performs facial verification and integrates directly
 ### Debian / Ubuntu / Kali
 
 ```bash
-sudo apt install -y \
+apt install -y \
   cmake ninja-build g++ \
   libpam0g-dev libaudit-dev \
   libopencv-dev \
+  nlohmann-json3-dev \
   pkg-config \
   python3 python3-opencv \
   socat pamtester jq
