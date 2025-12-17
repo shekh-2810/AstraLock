@@ -15,6 +15,19 @@ usage() {
 
 [ -z "$CMD" ] || [ -z "$USER" ] && usage
 
+require_nc() {
+  if ! command -v nc >/dev/null; then
+    echo "[!] nc not found. Please install netcat-openbsd."
+    exit 1
+  fi
+
+  if ! nc -h 2>&1 | grep -q -- "-U"; then
+    echo "[!] nc does not support UNIX sockets."
+    echo "[!] Install netcat-openbsd (BusyBox nc is incompatible)."
+    exit 1
+  fi
+}
+
 wait_socket() {
   for i in {1..20}; do
     [ -S "$SOCK" ] && return
@@ -24,11 +37,13 @@ wait_socket() {
   exit 1
 }
 
+require_nc
+
 case "$CMD" in
   enroll)
     wait_socket
-    echo "[*] Capturing face"
-    printf '{"cmd":"enroll","user":"%s"}\n' "$USER" | nc -U "$SOCK"
+    echo "[*] Capturing face (no output expected)"
+    printf '{"cmd":"enroll","user":"%s"}\n' "$USER" | nc -U "$SOCK" || true
 
     echo "[*] Training model"
     python3 /usr/share/facelock/train_lbph.py "$USER" --data-dir /var/lib/facelock
