@@ -14,10 +14,12 @@ apt install -y \
   cmake ninja-build g++ \
   libpam0g-dev libaudit-dev \
   libopencv-dev \
+  libspdlog-dev \
   nlohmann-json3-dev \
   pkg-config \
   python3 python3-opencv \
-  socat pamtester jq
+  netcat-openbsd \
+  pamtester jq
 
 echo "[*] Creating directories"
 mkdir -p /usr/lib/facelock /var/lib/facelock /usr/share/facelock
@@ -75,11 +77,11 @@ for i in {1..40}; do
   sleep 0.25
 done
 
-[ -S /run/facelock/facelock.sock ] || {
+if [ ! -S /run/facelock/facelock.sock ]; then
   echo "[!] facelock socket not ready"
   systemctl status facelock --no-pager
   exit 1
-}
+fi
 
 echo "[*] Creating PAM test service"
 tee /etc/pam.d/facelock-test >/dev/null <<EOF
