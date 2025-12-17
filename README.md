@@ -55,11 +55,11 @@ It runs a local daemon that performs facial verification and integrates directly
 
 | Distro        | Status |
 |---------------|--------|
-| Debian        | ✅ Supported | 
-| Ubuntu        | ✅ Supported |
-| Kali Linux    | ✅ Supported |
-| Arch Linux    | ⚠️ (manual deps) |
-| Fedora        | ⚠️ (SELinux rules needed) |
+| Debian        | ✅ Supported |    Primary target     |
+| Ubuntu        | ✅ Supported |    Same PAM stack     |
+| Kali Linux    | ✅ Supported |        Tested         |
+| Arch Linux    |  🚧 Planned  | Packaging differences |
+| Fedora        |  🚧 Planned  | SELinux integration   |
 
 ---
 
@@ -72,6 +72,7 @@ apt install -y \
   cmake ninja-build g++ \
   libpam0g-dev libaudit-dev \
   libopencv-dev \
+  libspdlog-dev \
   nlohmann-json3-dev \
   pkg-config \
   python3 python3-opencv \
