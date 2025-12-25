@@ -76,6 +76,7 @@ apt install -y \
   nlohmann-json3-dev \
   pkg-config \
   python3 python3-opencv \
+  netcat-openbsd \
   socat pamtester jq
 ```
 ---
