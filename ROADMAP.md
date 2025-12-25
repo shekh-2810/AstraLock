@@ -12,7 +12,7 @@ Dates are intentionally omitted — features ship when stable.
 - LBPH-based face recognition
 - PAM integration for login / sudo / polkit
 - systemd-managed daemon
-- UNIX socket IPC
+- netcat socket IPC
 
 **Status**
 - Released
@@ -33,17 +33,6 @@ Dates are intentionally omitted — features ship when stable.
 - No ONNX
 - No new distro support
 - No protocol changes
-
----
-
-## v2.0 (Breaking Release)
-
-**Goals**
-- ONNX-based face embeddings
-- Async IPC protocol (v2)
-- Distro-agnostic packaging
-- Stronger model lifecycle management
-- Backward-incompatible changes allowed
 
 ---
 
