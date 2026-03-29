@@ -171,57 +171,31 @@ Uses `pamtester` to validate PAM integration.
 
 ## Enabling PAM on System
 
-**⚠️ Proceed carefully. Always keep a root shell open.**
+⚠️ Always keep a root shell open before editing PAM files.
 
-- #### Enable for sudo
-
-Edit:
+**sudo + login:**
 ```bash
-sudo nano /etc/pam.d/sudo
+sudo sed -i '1s/^/auth sufficient pam_facelock.so\n/' /etc/pam.d/sudo
+sudo sed -i '1s/^/auth sufficient pam_facelock.so\n/' /etc/pam.d/login
 ```
 
-Add above `@include common-auth`:
+**GDM:**
 ```bash
-auth sufficient pam_facelock.so
+sudo sed -i '1s/^/auth sufficient pam_facelock.so\n/' /etc/pam.d/gdm-password
 ```
 
-- #### Enable for login (TTY)
+**SDDM:**
 ```bash
-sudo nano /etc/pam.d/login
+sudo sed -i '1s/^/auth sufficient pam_facelock.so\n/' /etc/pam.d/sddm
 ```
 
-Add:
+**Polkit (GUI sudo prompts):**
 ```bash
-auth sufficient pam_facelock.so
+sudo sed -i '1s/^/auth sufficient pam_facelock.so\n/' /etc/pam.d/polkit-1
 ```
 
-
-- #### Enable for GUI (GDM / SDDM / LightDM)
-  
-**GDM**
-```bash
-sudo nano /etc/pam.d/gdm-password
-```
-
-**SDDM**
-```bash
-sudo nano /etc/pam.d/sddm
-```
-
-Add:
-```bash
-auth sufficient pam_facelock.so
-```
-**Polkit (GUI sudo prompts)**
-```bash
-sudo nano /etc/pam.d/polkit-1
-```
-
-Add:
-```bash
-auth sufficient pam_facelock.so
-```
 ---
+
 
 ## Project Status & Roadmap
 
