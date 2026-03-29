@@ -34,3 +34,5 @@ Thumbs.db
 
 # ---------- Logs ----------
 *.log
+build/
+build-pam/
