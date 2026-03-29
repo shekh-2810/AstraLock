@@ -36,3 +36,5 @@ Thumbs.db
 *.log
 build/
 build-pam/
+build/
+build-pam/
