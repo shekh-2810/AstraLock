@@ -1,0 +1,15 @@
+[Unit]
+Description=Facelock biometric authentication daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/facelock/facelockd
+Restart=always
+
+
+RuntimeDirectory=facelock
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target

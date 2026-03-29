@@ -1,0 +1,7 @@
+# facelock config example
+socket_path = "/var/run/facelock/facelock.sock"
+data_dir = "/var/lib/facelock/"
+camera_device = 0
+onnx_model = "/usr/share/facelock/face_embedder.onnx"
+onnx_match_threshold = 0.45
+lbph_threshold = 80.0

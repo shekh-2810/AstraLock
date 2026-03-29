@@ -1,0 +1,1 @@
+/usr/bin/cc -fPIC -shared -Wl,--dependency-file=CMakeFiles/pam_facelock.dir/link.d -Wl,-soname,pam_facelock.so -o pam_facelock.so CMakeFiles/pam_facelock.dir/pam_facelock.c.o  -lpam

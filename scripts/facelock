@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -e
+
+CMD="$1"
+USER="$2"
+SOCK="/run/facelock/facelock.sock"
+
+usage() {
+  echo "Usage:"
+  echo "  facelock enroll <username>"
+  echo "  facelock verify <username>"
+  echo "  facelock test   <username>"
+  exit 1
+}
+
+[ -z "$CMD" ] || [ -z "$USER" ] && usage
+
+require_nc() {
+  if ! command -v nc >/dev/null; then
+    echo "[!] nc not found. Install netcat-openbsd."
+    exit 1
+  fi
+  if ! nc -h 2>&1 | grep -q -- "-U"; then
+    echo "[!] nc does not support UNIX sockets. Install netcat-openbsd."
+    exit 1
+  fi
+}
+
+wait_socket() {
+  for i in {1..20}; do
+    [ -S "$SOCK" ] && return
+    sleep 0.25
+  done
+  echo "[!] facelock daemon not running"
+  exit 1
+}
+
+require_nc
+
+case "$CMD" in
+  enroll)
+    wait_socket
+    echo "[*] Enrolling face for '$USER' (look at the camera)..."
+    RESULT=$(printf '{"v":2,"cmd":"enroll","user":"%s"}\n' "$USER" | nc -U "$SOCK")
+    echo "$RESULT" | jq .
+    if echo "$RESULT" | jq -e '.ok == true' >/dev/null 2>&1; then
+      systemctl restart facelock
+      echo "[✓] Enrollment complete"
+    else
+      echo "[!] Enrollment failed"
+      exit 1
+    fi
+    ;;
+
+  verify)
+    wait_socket
+    printf '{"v":2,"cmd":"auth","user":"%s"}\n' "$USER" | nc -U "$SOCK" | jq .
+    ;;
+
+  test)
+    pamtester facelock-test "$USER" authenticate
+    ;;
+
+  ping)
+    wait_socket
+    printf '{"v":2,"cmd":"ping","user":"%s"}\n' "$USER" | nc -U "$SOCK" | jq .
+    ;;
+
+  *)
+    usage
+    ;;
+esac

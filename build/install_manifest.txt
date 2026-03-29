@@ -1,0 +1,5 @@
+/usr/lib/facelock/facelockd
+/usr/lib/facelock/facelock-camera-helper
+/usr/local/share/facelock/config.example.toml
+/usr/local/share/facelock/train_lbph.py
+/usr/local/share/facelock/make_emb_bin_from_raw.py
