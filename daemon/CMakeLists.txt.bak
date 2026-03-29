@@ -1,0 +1,160 @@
+cmake_minimum_required(VERSION 3.16)
+project(facelockd LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# ------------------ Dependencies ------------------
+
+# OpenCV: core + modules we need; face (contrib) is optional but preferred
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs videoio objdetect)
+# Try to find optional face module (may be provided by opencv-contrib)
+find_package(OpenCV QUIET COMPONENTS face)
+if(TARGET OpenCV::face)
+    set(OpenCV_HAS_FACE TRUE)
+else()
+    set(OpenCV_HAS_FACE FALSE)
+endif()
+
+find_package(Threads REQUIRED)
+find_package(nlohmann_json 3.2.0 REQUIRED)
+find_package(spdlog REQUIRED)
+
+# ONNX Runtime root (where include/, lib/ etc live)
+# Default points to repository layout; allow override via -DONNXRUNTIME_DIR=...
+if(NOT ONNXRUNTIME_DIR)
+    set(ONNXRUNTIME_DIR
+        "${CMAKE_SOURCE_DIR}/../external/onnxruntime-linux-x64-1.23.2"
+        CACHE PATH "ONNX Runtime root directory")
+endif()
+
+# Find ONNX Runtime CMake package (CONFIG mode preferred)
+find_package(onnxruntime CONFIG QUIET
+    HINTS "${ONNXRUNTIME_DIR}"
+    PATH_SUFFIXES
+        lib/cmake/onnxruntime
+        cmake/onnxruntime
+)
+
+# ------------------ Optional external libs ------------------
+# CNpy (for reading .npy/.npz) - repo may be under <project-root>/external/cnpy
+set(CNPY_SRC_DIR "")
+if(EXISTS "${CMAKE_SOURCE_DIR}/external/cnpy/CMakeLists.txt")
+    set(CNPY_SRC_DIR "${CMAKE_SOURCE_DIR}/external/cnpy")
+elseif(EXISTS "${CMAKE_SOURCE_DIR}/../external/cnpy/CMakeLists.txt")
+    set(CNPY_SRC_DIR "${CMAKE_SOURCE_DIR}/../external/cnpy")
+endif()
+
+if(CNPY_SRC_DIR)
+    # when adding a subdirectory that is outside the current dir, provide an out-of-tree binary dir
+    set(CNPY_BINARY_DIR "${CMAKE_BINARY_DIR}/external_cmake_build/cnpy")
+    add_subdirectory("${CNPY_SRC_DIR}" "${CNPY_BINARY_DIR}" EXCLUDE_FROM_ALL)
+    set(HAS_CNPY TRUE)
+else()
+    message(STATUS "external/cnpy not found. If you need .npy/.npz support, git clone https://github.com/rogersce/cnpy.git into external/cnpy")
+    set(HAS_CNPY FALSE)
+endif()
+
+find_package(ZLIB REQUIRED)
+
+# ------------------ Sources ------------------
+# Collect sources inside daemon/src
+file(GLOB DAEMON_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+)
+
+# Exclude test files (they define main) from the main binary
+list(FILTER DAEMON_SOURCES EXCLUDE REGEX ".*test_.*\\.cpp$")
+list(FILTER DAEMON_SOURCES EXCLUDE REGEX ".*test_lbph\\.cpp$")
+
+# Create executable target
+add_executable(facelockd ${DAEMON_SOURCES})
+if (UNIX)
+  target_link_options(facelockd PRIVATE "-Wl,-rpath,$ORIGIN/../external/onnxruntime-linux-x64-1.23.2/lib")
+endif()
+
+
+# ------------------ Includes ------------------
+
+# Project headers
+target_include_directories(facelockd PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${OpenCV_INCLUDE_DIRS}
+)
+
+# If cnpy added, include its include dir (support both layouts)
+if(HAS_CNPY)
+    target_include_directories(facelockd PRIVATE "${CNPY_SRC_DIR}")
+endif()
+
+# ------------------ Compile-time defines ------------------
+# Provide HAVE_OPENCV_FACE to sources when face API is available at build time.
+if(OpenCV_HAS_FACE)
+    target_compile_definitions(facelockd PRIVATE HAVE_OPENCV_FACE=1)
+    message(STATUS "OpenCV face module detected; building with cv::face support.")
+else()
+    target_compile_definitions(facelockd PRIVATE HAVE_OPENCV_FACE=0)
+    message(STATUS "OpenCV face module NOT detected; building without cv::face support (NPZ fallback will be used).")
+endif()
+
+# ------------------ Link libraries ------------------
+
+# OpenCV variables: prefer modern OpenCV_LIBS; fall back to OpenCV_LIBRARIES
+if(DEFINED OpenCV_LIBS AND NOT "${OpenCV_LIBS}" STREQUAL "")
+    set(OPENCV_LINK ${OpenCV_LIBS})
+else()
+    set(OPENCV_LINK ${OpenCV_LIBRARIES})
+endif()
+
+target_link_libraries(facelockd PRIVATE
+    ${OPENCV_LINK}
+    Threads::Threads
+    nlohmann_json::nlohmann_json
+    spdlog::spdlog
+)
+
+# CNpy + zlib
+if(HAS_CNPY)
+    # Try common target names produced by cnpy CMakeLists
+    if(TARGET cnpy)
+        target_link_libraries(facelockd PRIVATE cnpy)
+    elseif(TARGET cnpy_shared)
+        target_link_libraries(facelockd PRIVATE cnpy_shared)
+    else()
+        # fallback: attempt to link by name (works if cnpy built as global library)
+        target_link_libraries(facelockd PRIVATE cnpy)
+    endif()
+    target_link_libraries(facelockd PRIVATE ZLIB::ZLIB)
+endif()
+
+# Link ONNX Runtime imported target if available
+if(TARGET onnxruntime::onnxruntime)
+    target_link_libraries(facelockd PRIVATE onnxruntime::onnxruntime)
+elseif(ONNXRUNTIME_DIR)
+    # try to find ONNX runtime libraries manually (fallback)
+    find_library(ONNXRUNTIME_LIB onnxruntime HINTS "${ONNXRUNTIME_DIR}/lib" "${ONNXRUNTIME_DIR}/lib64")
+    if(ONNXRUNTIME_LIB)
+        message(STATUS "Linking ONNX Runtime from ${ONNXRUNTIME_LIB}")
+        target_link_libraries(facelockd PRIVATE ${ONNXRUNTIME_LIB})
+        target_include_directories(facelockd PRIVATE "${ONNXRUNTIME_DIR}/include")
+    else()
+        message(FATAL_ERROR "onnxruntime target not found and ONNXRUNTIME_DIR provided but library missing.")
+    endif()
+else()
+    message(STATUS "ONNX Runtime not found; building without ONNX support. Provide -DONNXRUNTIME_DIR= to link ONNX runtime.")
+endif()
+
+# ------------------ Compiler warnings / flags (optional) ------------------
+if (MSVC)
+    target_compile_options(facelockd PRIVATE /W4 /permissive-)
+else()
+    target_compile_options(facelockd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-parameter)
+endif()
+
+# ------------------ Install rules ------------------
+install(TARGETS facelockd RUNTIME DESTINATION bin)
+
+# ------------------ Export compile commands for IDEs ------------------
+# When configured from top-level, CMAKE_EXPORT_COMPILE_COMMANDS=ON will generate compile_commands.json

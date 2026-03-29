@@ -1,0 +1,36 @@
+# ---------- Build artifacts ----------
+build/
+build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+
+# ---------- Binaries ----------
+facelockd
+pam_facelock.so
+facelock-camera-helper
+
+# ---------- Runtime data ----------
+/run/facelock/
+/var/lib/facelock/
+
+# ---------- Python ----------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ---------- IDE / editors ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+
+# ---------- Logs ----------
+*.log
