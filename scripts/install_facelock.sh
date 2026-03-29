@@ -122,6 +122,7 @@ echo "[*] Initial enrollment"
 facelock enroll "$USER_NAME"
 
 echo "[*] Testing PAM"
-pamtester facelock-test "$USER_NAME" authenticate
+pamtester facelock-test "$USER_NAME" authenticate || \
+  su - "$USER_NAME" -c "pamtester facelock-test $USER_NAME authenticate"
 
 echo "[✓] AstraLock v2.0 installation complete"
