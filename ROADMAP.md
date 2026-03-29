@@ -32,7 +32,6 @@ Dates are intentionally omitted — features ship when stable.
 ---
 
 ## v2.1 — Planned
-- Socket permissions fix (non-root CLI access)
 - ONNXWrapper instance caching (reduce per-auth latency)
 - Remove LBPH legacy code entirely
 - Arch Linux + Fedora support
