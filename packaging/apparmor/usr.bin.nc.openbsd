@@ -1,0 +1,6 @@
+# AstraLock AppArmor drop-in for netcat-openbsd
+# Allows the facelock CLI (which uses nc -U) to connect to the facelock socket.
+# Install to: /etc/apparmor.d/local/usr.bin.nc.openbsd
+
+# Allow nc to connect to the facelock UNIX domain socket
+/run/facelock/facelock.sock rw,

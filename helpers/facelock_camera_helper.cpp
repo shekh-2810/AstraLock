@@ -29,6 +29,15 @@ static Mode parse_mode(int argc, char** argv) {
     return Mode::BGR112;
 }
 
+static int parse_camera(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--camera") == 0 && i + 1 < argc) {
+            return std::atoi(argv[i+1]);
+        }
+    }
+    return 0; // default: /dev/video0
+}
+
 // Align face to ArcFace canonical positions using landmarks
 static cv::Mat align_face(const cv::Mat& frame, const cv::Mat& faces, int idx) {
     cv::Point2f src[5] = {
@@ -52,8 +61,9 @@ static cv::Mat align_face(const cv::Mat& frame, const cv::Mat& faces, int idx) {
 
 int main(int argc, char** argv) {
     Mode mode = parse_mode(argc, argv);
+    int  cam  = parse_camera(argc, argv);
 
-    cv::VideoCapture cap(0);
+    cv::VideoCapture cap(cam);
     if (!cap.isOpened()) return 1;
 
     cap.set(cv::CAP_PROP_FRAME_WIDTH,  640);

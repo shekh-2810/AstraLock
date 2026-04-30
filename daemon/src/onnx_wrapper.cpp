@@ -2,7 +2,14 @@
 
 #ifdef FACELOCK_ENABLE_ONNX
 
-#include <onnxruntime/onnxruntime_cxx_api.h>
+// Try the installed package path first, fall back to manual install path
+#if __has_include(<onnxruntime/onnxruntime_cxx_api.h>)
+#  include <onnxruntime/onnxruntime_cxx_api.h>
+#elif __has_include(<onnxruntime_cxx_api.h>)
+#  include <onnxruntime_cxx_api.h>
+#else
+#  error "Cannot find onnxruntime_cxx_api.h — check your ONNX Runtime installation"
+#endif
 #include <stdexcept>
 #include <vector>
 #include <cmath>

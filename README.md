@@ -14,7 +14,7 @@ It runs a local daemon that performs facial verification and integrates directly
 
 - A CLI tool for enrollment, verification, and testing
 
-- A local-only LBPH model (no cloud, no network)
+- A local-only ONNX model (no cloud, no network)
 
 *No external services.*
 *No telemetry.*
@@ -23,11 +23,67 @@ It runs a local daemon that performs facial verification and integrates directly
 ## Features
 
 - 🔐PAM authentication (`login`, `sudo`, `polkit`, `display managers`)
-- 🧠Offline facial recognition *(LBPH, OpenCV)*
+- 🧠Offline facial recognition
 - ⚙️systemd-managed daemon lifecycle
 - 📷 Webcam support via OpenCV
 - 🧪Built-in testing via `pamtester`
 - Simple CLI for users and admins
+---
+
+## Installation 
+```bash
+git clone https://github.com/shekh-2810/AstraLock.git
+cd AstraLock
+sudo scripts/install_facelock.sh <username>
+```
+
+#### Example
+
+```bash
+sudo scripts/install_facelock.sh shekh-2810
+```
+This will:
+
+- Build and install the daemon
+
+- Build and install the PAM module
+
+- Install and enable the systemd service
+
+- Enroll face samples
+
+- Train the local model
+
+- Verify PAM authentication
+
+
+## Quick Start
+```bash
+# Enroll your face
+facelock enroll <username>
+
+# Verify face directly
+facelock verify <username>
+
+# Uninstall everything
+sudo scripts/uninstall_facelock.sh
+
+# Test PAM
+sudo facelock test <username>
+```
+
+
+## Configuration 
+Config file: `/etc/facelock/facelock.conf`
+```bash
+CAMERA_DEVICE=0          # change to 1, 2 … for IR cameras (ls /dev/video*)
+ONNX_THRESHOLD=0.40      # lower = stricter
+ONNX_MODEL_PATH=/usr/share/facelock/models/w600k_mbf.onnx
+DATA_DIR=/var/lib/facelock
+SOCKET_PATH=/run/facelock/facelock.sock
+```
+After editing, restart the daemon:
+`sudo systemctl restart facelock`
 
 ---
 
@@ -51,7 +107,7 @@ It runs a local daemon that performs facial verification and integrates directly
                                    ArcFace ONNX embeddings
                                   (/var/lib/facelock/<user>)
 ```
-## Recognition Pipeline (v2.0)
+## Recognition Pipeline (v2.1)
 ```
                                          Camera frame
                                                │
@@ -67,9 +123,6 @@ It runs a local daemon that performs facial verification and integrates directly
                                                ▼
                                  Cosine distance → match/no-match
 ```
-
----
-
 
 ---
 
@@ -99,35 +152,6 @@ apt install -y \
   netcat-openbsd pamtester jq wget
 ```
 ---
-
-## Instalation 
-
-```bash
-git clone https://github.com/shekh-2810/AstraLock.git
-cd AstraLock
-sudo scripts/install_facelock.sh <username>
-
-```
-
-#### Example
-
-```bash
-sudo scripts/install_facelock.sh shekh-2810
-```
-This will:
-
-- Build and install the daemon
-
-- Build and install the PAM module
-
-- Install and enable the systemd service
-
-- Enroll face samples
-
-- Train the local model
-
-- Verify PAM authentication
---- 
 
 ## CLI Usage
 #### Enroll / Update Face
@@ -169,57 +193,25 @@ Uses `pamtester` to validate PAM integration.
 
 ---
 
-## Enabling PAM on System
-
-⚠️ Always keep a root shell open before editing PAM files.
-
-**sudo + login:**
-```bash
-sudo sed -i '1s/^/auth sufficient pam_facelock.so\n/' /etc/pam.d/sudo
-sudo sed -i '1s/^/auth sufficient pam_facelock.so\n/' /etc/pam.d/login
-```
-
-**GDM:**
-```bash
-sudo sed -i '1s/^/auth sufficient pam_facelock.so\n/' /etc/pam.d/gdm-password
-```
-
-**SDDM:**
-```bash
-sudo sed -i '1s/^/auth sufficient pam_facelock.so\n/' /etc/pam.d/sddm
-```
-
-**Polkit (GUI sudo prompts):**
-```bash
-sudo sed -i '1s/^/auth sufficient pam_facelock.so\n/' /etc/pam.d/polkit-1
-```
-
----
-
-
 ## Project Status & Roadmap
 
-**AstraLock** is actively maintained and currently in *Version 2* (**v2**).
+**AstraLock** is actively maintained and currently in *Version 2.1* (**v2.1**).
 
 #### This release focuses on:
 
-- ONNX-based ArcFace embeddings (512-dim, cosine similarity)
-- Deterministic IPC protocol (v2) between PAM and daemon
-- Stable systemd-managed daemon lifecycle
-- Fully offline inference with reproducible model delivery
-- Clean install, upgrade, and removal paths
+- ONNX session caching — model loaded once, shared across all auth requests
+- Config file support — tune camera, threshold, and paths without recompiling
+- Automatic PAM setup for sudo, login, and display managers at install time
+- Enrollment quality validation — blur and brightness checks reject bad samples
+- Structured audit logging to LOG_AUTHPRIV for every auth and enroll event
+- AppArmor compatibility — drop-in rule installed automatically
   
 #### Future releases will focus on:
 
-- More reliable face detection (modern ONNX-based)
-
-- Faster recognition paths
-
-- Support for more distros (Arch, Fedora)
-
-- Hardening against edge-case PAM failures
-
-- Optional advanced models (still offline)
+- Liveness detection — anti-spoofing against photos and video replay
+- Unit tests for scoring logic, config parsing, and error paths
+- Arch Linux and Fedora support
+- pam_conversation feedback — real-time "face detected / try again" during auth
 
 ### *AstraLock exists because existing solutions (notably Howdy) suffer from:*
 
