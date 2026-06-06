@@ -1,0 +1,344 @@
+#!/usr/bin/env bash
+# ============================================================
+#  facelock  —  AstraLock v3 CLI
+# ============================================================
+set -euo pipefail
+
+SOCK="/run/facelock/facelock.sock"
+VERSION="3.0.0"
+
+# ── Usage ─────────────────────────────────────────────────────
+usage() {
+  cat <<EOF
+AstraLock v${VERSION} — face authentication CLI
+
+Usage:
+  facelock enroll <username>   Enroll face for a user
+  facelock verify <username>   Run a face authentication check
+  facelock test   <username>   Run PAM stack test via pamtester
+  facelock list                List enrolled users
+  facelock delete <username>   Remove a user's face data
+  facelock status              Daemon health, version, camera status
+  facelock ping                Raw daemon ping (JSON)
+
+Options:
+  -h, --help    Show this help
+
+EOF
+  exit 0
+}
+
+# ── IPC send/receive ──────────────────────────────────────────
+# Sends $1 (JSON string) to the daemon socket and prints the response.
+# $2 = wall-clock timeout in seconds (default 30).
+#
+# Transport priority:
+#   1. python3  — always present on Kali/Debian; true Unix socket, no races.
+#   2. socat    — STDIO mode so stdin EOF does NOT prematurely close the socket
+#                 before the response arrives (the old "-" hyphen mode did this).
+#   3. nc -U    — last resort; wrapped in timeout(1) for a hard wall-clock limit.
+#
+# Why not "exec 3<> $SOCK" (pure bash)?
+#   Linux does not expose AF_UNIX via open(2)/fd redirection. The exec call
+#   returns ENXIO on every tested kernel — confirmed on Kali. Not usable.
+#
+# Why not socat with "-" (hyphen) as before?
+#   Hyphen maps stdin→socket AND propagates stdin EOF as FIN immediately.
+#   The daemon is silent for several seconds while the camera opens and runs
+#   detection. Some socat builds close the connection on that FIN before the
+#   response arrives, producing empty output and a silent exit.
+ipc_send() {
+  local payload="$1"
+  local timeout="${2:-30}"
+
+  # ── Option 1: python3 ───────────────────────────────────────────────────
+  # True Unix socket with settimeout() — no inactivity-timer races, no stdin
+  # EOF propagation issue. python3 is always installed on Kali/Debian.
+  if command -v python3 >/dev/null 2>&1; then
+    # Write the IPC helper once; single-quoted heredoc = zero bash expansion.
+    local _pyhelper="/tmp/_facelock_ipc.py"
+    if [[ ! -f "$_pyhelper" ]]; then
+      cat > "$_pyhelper" << 'PY'
+import socket, sys
+sock_path, timeout = sys.argv[1], float(sys.argv[2])
+payload = sys.stdin.buffer.read()
+try:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    s.connect(sock_path)
+    s.sendall(payload)
+    buf = b''
+    while True:
+        chunk = s.recv(4096)
+        if not chunk:
+            break
+        buf += chunk
+        if b'\n' in buf:
+            break
+    sys.stdout.buffer.write(buf)
+    s.close()
+except Exception as e:
+    sys.stderr.write('[facelock ipc] ' + str(e) + '\n')
+    sys.exit(1)
+PY
+    fi
+    printf '%s\n' "$payload" | python3 "$_pyhelper" "$SOCK" "$timeout"
+    return
+  fi
+
+  # ── Option 2: socat with STDIO ──────────────────────────────────────────
+  # STDIO (not hyphen) keeps the connection open after stdin EOF so the
+  # daemon has time to finish capture and send the response.
+  if command -v socat >/dev/null 2>&1; then
+    printf '%s\n' "$payload" | \
+      socat -T "$timeout" STDIO "UNIX-CONNECT:${SOCK}"
+    return
+  fi
+
+  # ── Option 3: nc -U wrapped in timeout(1) ───────────────────────────────
+  if command -v nc >/dev/null 2>&1 && nc -h 2>&1 | grep -q -- '-U'; then
+    if command -v timeout >/dev/null 2>&1; then
+      printf '%s\n' "$payload" | \
+        timeout "$timeout" nc -U -q "$timeout" "$SOCK" 2>/dev/null
+    else
+      printf '%s\n' "$payload" | nc -U -q "$timeout" "$SOCK" 2>/dev/null
+    fi
+    return
+  fi
+
+  echo "[!] No IPC transport found. Run: apt install python3"
+  exit 1
+}
+
+# ── Socket check ──────────────────────────────────────────────
+wait_socket() {
+  for _ in $(seq 1 20); do
+    [ -S "$SOCK" ] && return 0
+    sleep 0.25
+  done
+  echo "[!] AstraLock daemon is not running."
+  echo "    Start it: sudo systemctl start facelockd"
+  exit 1
+}
+
+# ── jq check (used for pretty-print, not required for logic) ──
+HAS_JQ=0
+command -v jq >/dev/null 2>&1 && HAS_JQ=1
+
+pretty() {
+  if [ "$HAS_JQ" -eq 1 ]; then
+    jq .
+  else
+    cat
+  fi
+}
+
+# ── JSON bool extractor (no jq dependency for logic) ──────────
+json_bool() {
+  # json_bool <json_string> <key>  →  prints "true" or "false"
+  echo "$1" | grep -oP "\"${2}\"\\s*:\\s*\\K(true|false)" | head -1
+}
+
+json_str() {
+  # json_str <json_string> <key>  →  prints the string value
+  echo "$1" | grep -oP "\"${2}\"\\s*:\\s*\"\\K[^\"]+" | head -1
+}
+
+# ── Commands ──────────────────────────────────────────────────
+
+cmd_enroll() {
+  local user="$1"
+  wait_socket
+  echo "[*] Enrolling face for '${user}' ..."
+  echo "    Look at the camera and hold still. Blink naturally."
+  echo "    This will take up to 60 seconds."
+  echo ""
+
+  local result
+  result=$(ipc_send "{\"v\":3,\"cmd\":\"enroll\",\"user\":\"${user}\"}" 90)
+
+  echo "$result" | pretty
+
+  local success
+  success=$(json_bool "$result" "ok")
+  if [ "$success" = "true" ]; then
+    local samples hint_threshold
+    samples=$(echo "$result" | grep -oP '"samples"\s*:\s*\K[0-9]+' | head -1)
+    hint_threshold=$(echo "$result" | grep -oP '"threshold"\s*:\s*\K[0-9.]+' | head -1)
+    echo ""
+    echo "╔═══════════════════════════════════════════════════╗"
+    echo "║  ✓ Enrollment complete                            ║"
+    printf  "║    Samples:    %-34s ║\n" "${samples}"
+    printf  "║    Threshold:  %-34s ║\n" "${hint_threshold}"
+    echo "╚═══════════════════════════════════════════════════╝"
+  else
+    local err hint
+    err=$(json_str "$result" "err")
+    hint=$(json_str "$result" "hint")
+    echo ""
+    echo "[✗] Enrollment failed: ${err}"
+    [ -n "$hint" ] && echo "    ${hint}"
+    exit 1
+  fi
+}
+
+cmd_verify() {
+  local user="$1"
+  wait_socket
+  echo "[*] Verifying face for '${user}' ..."
+
+  local result
+  result=$(ipc_send "{\"v\":3,\"cmd\":\"auth\",\"user\":\"${user}\"}" 30)
+
+  echo "$result" | pretty
+
+  local match
+  match=$(json_bool "$result" "match")
+  if [ "$match" = "true" ]; then
+    echo ""
+    echo "[✓] Face recognised — authentication PASSED"
+  else
+    local err hint
+    err=$(json_str "$result" "err")
+    hint=$(json_str "$result" "hint")
+    echo ""
+    echo "[✗] Face NOT recognised — authentication FAILED"
+    [ -n "$err"  ] && echo "    Error: ${err}"
+    [ -n "$hint" ] && echo "    Hint:  ${hint}"
+    exit 1
+  fi
+}
+
+cmd_test() {
+  local user="$1"
+  if ! command -v pamtester >/dev/null 2>&1; then
+    echo "[!] pamtester not found. Install: apt install pamtester"
+    exit 1
+  fi
+  echo "[*] Running PAM test for '${user}' ..."
+  pamtester facelock-test "$user" authenticate
+}
+
+cmd_list() {
+  wait_socket
+  echo "[*] Enrolled users:"
+  echo ""
+
+  local result
+  result=$(ipc_send '{"v":3,"cmd":"list"}')
+
+  if [ "$HAS_JQ" -eq 1 ]; then
+    local ok_val
+    ok_val=$(json_bool "$result" "ok")
+    if [ "$ok_val" = "true" ]; then
+      echo "$result" | jq -r '(if type=="array" then .[0] else . end) | .users[] | "  \(.user)  (samples: \(.samples), threshold: \(.threshold))"'
+    else
+      echo "[!] Failed to retrieve user list"
+      echo "$result" | jq .
+      exit 1
+    fi
+  else
+    # Fallback without jq
+    echo "$result"
+  fi
+}
+
+cmd_delete() {
+  local user="$1"
+  echo "[!] This will permanently delete all face data for '${user}'."
+  read -r -p "    Are you sure? [y/N] " confirm
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "[*] Aborted."
+    exit 0
+  fi
+
+  wait_socket
+  local result
+  result=$(ipc_send "{\"v\":3,\"cmd\":\"delete\",\"user\":\"${user}\"}")
+
+  echo "$result" | pretty
+
+  local ok_val
+  ok_val=$(json_bool "$result" "ok")
+  if [ "$ok_val" = "true" ]; then
+    echo ""
+    echo "[✓] Face data for '${user}' deleted."
+  else
+    local err
+    err=$(json_str "$result" "err")
+    echo "[✗] Delete failed: ${err}"
+    exit 1
+  fi
+}
+
+cmd_status() {
+  wait_socket
+  echo "[*] AstraLock daemon status:"
+  echo ""
+
+  local result
+  result=$(ipc_send '{"v":3,"cmd":"ping"}')
+
+  local ok_val daemon_ver camera_ok
+  ok_val=$(json_bool "$result"    "ok")
+  daemon_ver=$(json_str "$result"  "version")
+  camera_ok=$(json_bool "$result"  "camera_ready")
+
+  if [ "$ok_val" = "true" ]; then
+    echo "  Status:  ● running"
+    echo "  Version: ${daemon_ver}"
+    if [ "$camera_ok" = "true" ]; then
+      echo "  Camera:  ✓ ready"
+    else
+      echo "  Camera:  ✗ not ready"
+    fi
+    echo ""
+    systemctl status facelockd --no-pager --lines=0 2>/dev/null || true
+  else
+    echo "  Status: ✗ daemon not responding"
+    exit 1
+  fi
+}
+
+cmd_ping() {
+  wait_socket
+  ipc_send '{"v":3,"cmd":"ping"}' | pretty
+}
+
+# ── Argument dispatch ─────────────────────────────────────────
+CMD="${1:-}"
+case "$CMD" in
+  -h|--help|"") usage ;;
+esac
+
+case "$CMD" in
+  enroll)
+    [ -z "${2:-}" ] && { echo "Usage: facelock enroll <username>"; exit 1; }
+    cmd_enroll "$2"
+    ;;
+  verify)
+    [ -z "${2:-}" ] && { echo "Usage: facelock verify <username>"; exit 1; }
+    cmd_verify "$2"
+    ;;
+  test)
+    [ -z "${2:-}" ] && { echo "Usage: facelock test <username>"; exit 1; }
+    cmd_test "$2"
+    ;;
+  list)
+    cmd_list
+    ;;
+  delete)
+    [ -z "${2:-}" ] && { echo "Usage: facelock delete <username>"; exit 1; }
+    cmd_delete "$2"
+    ;;
+  status)
+    cmd_status
+    ;;
+  ping)
+    cmd_ping
+    ;;
+  *)
+    echo "[!] Unknown command: $CMD"
+    usage
+    ;;
+esac

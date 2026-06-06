@@ -1,0 +1,60 @@
+[Unit]
+Description=AstraLock Face Authentication Daemon (v3)
+Documentation=https://github.com/shekh-2810/AstraLock
+
+# ── Boot ordering ─────────────────────────────────────────────────────────────
+# Start after udev has settled so /dev/videoN exists, but BEFORE the display
+# manager presents the login screen.  systemd holds display-manager.service
+# until facelockd sends sd_notify READY=1 (after ONNX load + camera warmup).
+After=basic.target local-fs.target udev-settle.service
+Before=display-manager.service
+Wants=display-manager.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+
+ExecStart=/usr/sbin/facelockd
+Restart=on-failure
+RestartSec=3s
+
+TimeoutStartSec=30s
+TimeoutStopSec=10s
+
+# ── Runtime directories ───────────────────────────────────────────────────────
+RuntimeDirectory=facelock
+RuntimeDirectoryMode=0755
+StateDirectory=facelock
+StateDirectoryMode=0700
+
+# ── User ─────────────────────────────────────────────────────────────────────
+User=root
+Group=video
+
+# ── Security hardening ────────────────────────────────────────────────────────
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/usr/share/facelock
+ReadWritePaths=/var/lib/facelock /run/facelock
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+SystemCallFilter=@system-service @file-system
+
+# ── Camera device access ──────────────────────────────────────────────────────
+# DevicePolicy=closed means ONLY devices listed in DeviceAllow are accessible.
+# DevicePolicy=auto (the default) is too permissive on some kernels and too
+# restrictive on others — explicit closed+allow is the correct approach.
+#
+# char-v4l: covers /dev/video* by subsystem (major 81) as a belt-and-suspenders
+# fallback for kernels where glob matching in DeviceAllow is not supported.
+PrivateDevices=no
+DevicePolicy=closed
+DeviceAllow=/dev/video0 rw
+DeviceAllow=/dev/video1 rw
+DeviceAllow=char-v4l rw
+
+[Install]
+WantedBy=multi-user.target
