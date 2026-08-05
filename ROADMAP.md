@@ -14,7 +14,7 @@ Dates are intentionally omitted — features ship when stable.
 
 ---
 
-## v2.0 (previous)
+## v2.0 (deprecated)
 
 - Full ONNX ArcFace pipeline (`w600k_mbf.onnx`, MobileNet backbone)
 - RetinaFace detector via `FaceDetectorYN`
@@ -27,7 +27,7 @@ Dates are intentionally omitted — features ship when stable.
 
 ---
 
-## v2.1 (previous)
+## v2.1 (deprecated)
 - ONNX include path handles both apt and manual installs via __has_include
 - Config file (/etc/facelock/facelock.conf) now correctly read at daemon startup
 - ONNX session caching — model loaded once, shared via mutex-protected singleton with 2 warmup inferences
@@ -42,7 +42,7 @@ Dates are intentionally omitted — features ship when stable.
 
 ---
 
-## v3 (released)
+## v3 (previous)
 
 - IPC v3 protocol — versioned UNIX socket with thread pool for concurrent auth requests
 - Multi-user support — enroll and manage multiple users independently with isolated embeddings
@@ -56,7 +56,7 @@ Dates are intentionally omitted — features ship when stable.
 - Streamlined codebase — removed redundant files and consolidated dependencies 
 ---
 
-## v3.1 (planned)
+## v3.1 (previous)
 
 - GStreamer fallback — fix camera access under systemd cgroup isolation
 - Live enrollment preview with quality scores (brightness, blur)
