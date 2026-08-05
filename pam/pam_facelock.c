@@ -16,6 +16,17 @@
  *  3. pam_conversation feedback — sends PAM_TEXT_INFO messages at each
  *     stage so the user sees "Scanning face…", "No face found (1/3)", etc.
  *     instead of a silent frozen prompt.
+ *
+ *  4. (v3.2) Minimum scan-message display floor — the daemon's cached ONNX
+ *     session and already-open camera can finish an auth round-trip faster
+ *     than a graphical greeter can actually paint the "scanning face…"
+ *     message (greeters relay PAM_TEXT_INFO to their UI process
+ *     asynchronously, so pam_conversation() returning does not mean the
+ *     message is on screen yet). Without a floor, the result message can
+ *     overwrite "scanning" before the user ever sees it, looking like the
+ *     scan and the message are racing. PAM_MIN_SCAN_DISPLAY_MS in
+ *     facelock.conf (default 600ms, 0 disables) guarantees the scanning
+ *     message stays up for at least that long before being replaced.
  */
 
 #include <security/pam_modules.h>
@@ -33,13 +44,17 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <ctype.h>
+#include <time.h>
 
 #define FACELOCK_SOCK         "/run/facelock/facelock.sock"
+#define FACELOCK_CONFIG_PATH  "/etc/facelock/facelock.conf"
 #define FACELOCK_TIMEOUT_MS   10000   /* ms to wait for daemon response  */
 #define FACELOCK_CONN_TIMEOUT 2000    /* ms to wait for connect          */
 #define FACELOCK_MAX_TRIES    3
 #define FACELOCK_REQ_MAX      512     /* max request buffer              */
 #define FACELOCK_RESP_MAX     1024    /* max response buffer             */
+#define FACELOCK_MIN_DISPLAY_DEFAULT_MS 600  /* floor for "scanning" msg */
+#define FACELOCK_MIN_DISPLAY_MAX_MS     5000 /* sanity cap on config val */
 
 /* ──────────────────────────────────────────────────────────────────────────
  * pfl_conv — send a PAM_TEXT_INFO message via the conversation function.
@@ -58,6 +73,71 @@ static void pfl_conv(pam_handle_t *pamh, const char *msg)
 
     conv->conv(1, (const struct pam_message **)&mp, &r, conv->appdata_ptr);
     if (r) free(r);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * pfl_load_min_display_ms — read PAM_MIN_SCAN_DISPLAY_MS from
+ * /etc/facelock/facelock.conf (KEY=VALUE, '#' comments, same format the
+ * daemon uses). Falls back to the compiled-in default if the file, key, or
+ * value is missing/invalid. This is the only key the PAM module reads, so
+ * parsing stays deliberately minimal rather than pulling in the daemon's
+ * full config parser.
+ * ──────────────────────────────────────────────────────────────────────────*/
+static long pfl_load_min_display_ms(void)
+{
+    static const char *KEY = "PAM_MIN_SCAN_DISPLAY_MS";
+    const size_t keylen = strlen(KEY);
+    long val = FACELOCK_MIN_DISPLAY_DEFAULT_MS;
+
+    FILE *f = fopen(FACELOCK_CONFIG_PATH, "r");
+    if (!f) return val;
+
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        char *hash = strchr(line, '#');
+        if (hash) *hash = '\0';
+
+        char *p = line;
+        while (*p == ' ' || *p == '\t') ++p;
+        if (strncmp(p, KEY, keylen) != 0) continue;
+        p += keylen;
+
+        while (*p == ' ' || *p == '\t') ++p;
+        if (*p != '=') continue;
+        ++p;
+        while (*p == ' ' || *p == '\t') ++p;
+
+        char *endptr = NULL;
+        long parsed = strtol(p, &endptr, 10);
+        if (endptr != p && parsed >= 0 && parsed <= FACELOCK_MIN_DISPLAY_MAX_MS)
+            val = parsed;  /* last valid occurrence wins, same as daemon */
+    }
+    fclose(f);
+    return val;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * pfl_wait_min_display — sleeps off the remainder of `min_ms` measured
+ * from `start`, if any time is left. Used to guarantee the "scanning
+ * face…" message has been visible for a minimum duration before it gets
+ * replaced by the result message (see v3.2 note in the file header).
+ * ──────────────────────────────────────────────────────────────────────────*/
+static void pfl_wait_min_display(const struct timespec *start, long min_ms)
+{
+    if (min_ms <= 0) return;
+
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+
+    long elapsed_ms = (now.tv_sec  - start->tv_sec)  * 1000L
+                    + (now.tv_nsec - start->tv_nsec) / 1000000L;
+    long remaining_ms = min_ms - elapsed_ms;
+    if (remaining_ms <= 0) return;
+
+    struct timespec ts;
+    ts.tv_sec  = remaining_ms / 1000;
+    ts.tv_nsec = (remaining_ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
 }
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -245,18 +325,22 @@ static ssize_t pfl_send_recv(int fd, const char *req,
  * facelock_single_try — one attempt: connect → send auth → parse response
  * ──────────────────────────────────────────────────────────────────────────*/
 static int facelock_single_try(pam_handle_t *pamh, const char *user,
-                                int attempt)
+                                int attempt, long min_display_ms)
 {
     /* --- Build conversation message for this attempt --- */
     char conv_msg[128];
     snprintf(conv_msg, sizeof(conv_msg),
              "AstraLock: scanning face… (attempt %d/%d)",
              attempt + 1, FACELOCK_MAX_TRIES);
+
+    struct timespec scan_start;
+    clock_gettime(CLOCK_MONOTONIC, &scan_start);
     pfl_conv(pamh, conv_msg);
 
     /* --- Connect --- */
     int fd = pfl_connect(pamh);
     if (fd < 0) {
+        pfl_wait_min_display(&scan_start, min_display_ms);
         pfl_conv(pamh, "AstraLock: daemon unavailable — skipping face auth");
         return PAM_IGNORE;
     }
@@ -277,6 +361,10 @@ static int facelock_single_try(pam_handle_t *pamh, const char *user,
     char resp[FACELOCK_RESP_MAX] = {0};
     ssize_t n = pfl_send_recv(fd, req, resp, sizeof(resp));
     close(fd);
+
+    /* Every path below shows a result message that replaces "scanning" —
+     * hold here first so it was visible for at least min_display_ms. */
+    pfl_wait_min_display(&scan_start, min_display_ms);
 
     if (n <= 0) {
         pam_syslog(pamh, LOG_WARNING, "no response from daemon (user=%s)", user);
@@ -356,9 +444,11 @@ PAM_EXTERN int pam_sm_authenticate(
         return PAM_IGNORE;
     }
 
+    const long min_display_ms = pfl_load_min_display_ms();
+
     int result = PAM_IGNORE;
     for (int i = 0; i < FACELOCK_MAX_TRIES; ++i) {
-        result = facelock_single_try(pamh, user, i);
+        result = facelock_single_try(pamh, user, i, min_display_ms);
         if (result == PAM_SUCCESS || result == PAM_IGNORE) break;
         if (i < FACELOCK_MAX_TRIES - 1)
             sleep(1);   /* 1s back-off between retries */

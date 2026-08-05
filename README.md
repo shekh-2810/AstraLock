@@ -160,8 +160,8 @@ After editing, restart the daemon:
 | Debian        | ✅ Supported | 
 | Ubuntu        | ✅ Supported |
 | Kali Linux    | ✅ Supported |
-| Arch Linux    | 🔧 Build portable |
-| Fedora/RHEL   | 🔧 Build portable |
+| Arch Linux    | Under Testing |
+| Fedora/RHEL   | Under Testing |
 
 ---
 

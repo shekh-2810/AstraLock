@@ -200,8 +200,20 @@ bool Daemon::initialize()
 // ============================================================
 //  handle_enroll
 // ============================================================
-json Daemon::handle_enroll(const std::string& user)
+json Daemon::handle_enroll(const std::string& user, bool force)
 {
+    // Guard against silently clobbering existing embeddings — this was the
+    // cause of "kept my data across reinstall but it stopped working": the
+    // installer's default enrollment prompt used to call this unconditionally
+    // and overwrite whatever was already on disk. Plain "enroll" now refuses
+    // if data exists; "reenroll" (force=true) is the explicit overwrite path.
+    if (!force && storage_exists(cfg_.data_dir, user)) {
+        spdlog::info("Enroll refused for '{}': already enrolled (use reenroll to overwrite)", user);
+        return {{"v", 3}, {"ok", false}, {"err", "already_enrolled"},
+                 {"hint", "Face data already exists for " + user +
+                          ". Use 'facelock reenroll " + user + "' to overwrite it."}};
+    }
+
     fs::path userdir = fs::path(cfg_.data_dir) / user;
     fs::create_directories(userdir);
 
@@ -347,7 +359,7 @@ json Daemon::handle_auth(const std::string& user)
     if (!storage_load(cfg_.data_dir, user, store)) {
         audit("auth", user, false, -1.f, -1.f, "load_failed");
         return {{"v", 3}, {"ok", false}, {"err", "load_failed"}, {"match", false},
-                 {"hint", "Embedding file is corrupt. Re-enroll: facelock enroll " + user}};
+                 {"hint", "Embedding file is corrupt. Re-enroll: facelock reenroll " + user}};
     }
 
     cv::Mat face;
@@ -455,12 +467,13 @@ json Daemon::handle_request(const json& req)
         return {{"v", 3}, {"ok", false}, {"err", "no_user"},
                  {"hint", "Provide a 'user' field in the request"}};
 
-    if (cmd == "enroll") return handle_enroll(user);
-    if (cmd == "auth")   return handle_auth(user);
-    if (cmd == "delete") return handle_delete(user);
+    if (cmd == "enroll")   return handle_enroll(user, /*force=*/false);
+    if (cmd == "reenroll") return handle_enroll(user, /*force=*/true);
+    if (cmd == "auth")     return handle_auth(user);
+    if (cmd == "delete")   return handle_delete(user);
 
     return {{"v", 3}, {"ok", false}, {"err", "unknown_cmd"},
-             {"hint", "Valid commands: enroll, auth, ping, list, delete"}};
+             {"hint", "Valid commands: enroll, reenroll, auth, ping, list, delete"}};
 }
 
 // ============================================================

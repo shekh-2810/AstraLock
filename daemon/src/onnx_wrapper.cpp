@@ -37,15 +37,27 @@ struct ONNXWrapper::Impl {
         session = std::make_unique<Ort::Session>(
             env, model_path.c_str(), opts);
 
-        // Cache input name
+        // Cache input/output names via GetInputNameAllocated/GetOutputNameAllocated —
+        // the Session::GetInputNames()/GetOutputNames() convenience wrappers used
+        // here previously don't exist on ONNX Runtime 1.17.x (the version this
+        // project's installer fetches); GetXNameAllocated() is available across
+        // both older and newer releases.
+        Ort::AllocatorWithDefaultOptions allocator;
+
         try {
-            auto names = session->GetInputNames();
-            if (!names.empty()) input_name = names[0];
+            if (session->GetInputCount() > 0) {
+                auto name_ptr = session->GetInputNameAllocated(0, allocator);
+                input_name = name_ptr.get();
+            }
         } catch (...) {}
 
-        // Cache output names
         try {
-            output_names = session->GetOutputNames();
+            const size_t n_outputs = session->GetOutputCount();
+            output_names.reserve(n_outputs);
+            for (size_t i = 0; i < n_outputs; ++i) {
+                auto name_ptr = session->GetOutputNameAllocated(i, allocator);
+                output_names.emplace_back(name_ptr.get());
+            }
         } catch (...) {}
 
         // Cache input spatial size from model metadata

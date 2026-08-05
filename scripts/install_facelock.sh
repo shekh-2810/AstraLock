@@ -8,8 +8,8 @@ set -euo pipefail
 IFS=$'\n\t'
 
 # ── Version & release config ──────────────────────────────────────────────────
-ASTRALOCK_VERSION="3.0"
-RELEASE_BASE="https://github.com/shekh-2810/AstraLock/releases/download/v${ASTRALOCK_VERSION}"
+ASTRALOCK_VERSION="3.2"
+RELEASE_BASE="https://github.com/shekh-2810/AstraLock/releases/download/v3.0"
 ONNX_VER="1.17.3"
 REPO_URL="https://github.com/shekh-2810/AstraLock.git"
 
@@ -18,6 +18,7 @@ MODEL_DIR="/usr/share/facelock/models"
 MODEL_PATH="$MODEL_DIR/w600k_mbf.onnx"
 DETECTOR_PATH="$MODEL_DIR/retinaface.onnx"
 CONFIG_DEST="/etc/facelock/facelock.conf"
+DATA_DIR_DEFAULT="/var/lib/facelock"
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -35,14 +36,26 @@ die()   { echo -e "  ${RED}[✗]${RST} $*" >&2; exit 1; }
 step()  { echo -e "\n${BOLD}${CYN}▶ $*${RST}"; }
 hr()    { echo -e "${DIM}──────────────────────────────────────────────────────────${RST}"; }
 
+# ── Resolve the active DATA_DIR (honors an existing config override) ─────────
+get_data_dir() {
+  local d="$DATA_DIR_DEFAULT"
+  if [ -f "$CONFIG_DEST" ]; then
+    local cfg_val
+    cfg_val=$(grep -E '^\s*DATA_DIR\s*=' "$CONFIG_DEST" 2>/dev/null \
+                | tail -1 | cut -d= -f2- | xargs)
+    [ -n "$cfg_val" ] && d="$cfg_val"
+  fi
+  echo "${d%/}"
+}
+
 # ── Banner ────────────────────────────────────────────────────────────────────
 banner() {
   echo -e "${CYN}"
   cat << 'BANNER'
    ___         __           __              __  
-  / _ | ___ / /________ _ / /  ___  ____  / /__
- / __ |(_-</ __/ __/ _ `// /  / _ \/ __/ /  '_/
-/_/ |_/___/\__/_/  \_,_//_/   \___/\__/ /_/\_\ 
+  / _ | ___ / /________ _ / / ___  ____  / /__
+ / __ |(_-</ __/ __/ _ `// / / _ \/ __/ /  '_/
+/_/ |_/___/\__/_/  \_,_//_/  \___/\__/ /_/\_\ 
 
 BANNER
   echo -e "${RST}  ${BOLD}AstraLock v${ASTRALOCK_VERSION}${RST} — Face-based Linux Authentication"
@@ -231,9 +244,25 @@ install_onnx() {
     ONNX_URL="https://github.com/microsoft/onnxruntime/releases/download/v${ONNX_VER}/onnxruntime-linux-${ONNX_ARCH}-${ONNX_VER}.tgz"
     wget -q --show-progress "$ONNX_URL" -O "$ONNX_TGZ" \
       || die "Failed to download ONNX Runtime. Check network."
-    tar -xzf "$ONNX_TGZ" -C /usr/local --strip-components=1
+
+    # Extract to a scratch dir first, then place headers under
+    # /usr/local/include/onnxruntime/ — that nested path is what
+    # CMakeLists.txt's manual-install detection actually searches
+    # (a flat --strip-components=1 straight into /usr/local previously
+    # landed headers one level too shallow, so cmake could never find
+    # them and the build failed on any distro without a packaged
+    # onnxruntime — i.e. most of them).
+    ONNX_EXTRACT_DIR="/tmp/onnxruntime-extract-$$"
+    rm -rf "$ONNX_EXTRACT_DIR"
+    mkdir -p "$ONNX_EXTRACT_DIR"
+    tar -xzf "$ONNX_TGZ" -C "$ONNX_EXTRACT_DIR" --strip-components=1
+
+    mkdir -p /usr/local/include/onnxruntime
+    cp "$ONNX_EXTRACT_DIR"/include/*.h /usr/local/include/onnxruntime/
+    cp -P "$ONNX_EXTRACT_DIR"/lib/*.so* /usr/local/lib/
     ldconfig
-    rm -f "$ONNX_TGZ"
+
+    rm -rf "$ONNX_EXTRACT_DIR" "$ONNX_TGZ"
     ok "ONNX Runtime ${ONNX_VER} installed to /usr/local"
   fi
 }
@@ -316,6 +345,13 @@ write_config() {
 # LIVENESS_EAR_THRESHOLD=0.22
 # IPC_THREADS=4
 # CAMERA_WARMUP_FRAMES=5
+
+# PAM feedback — minimum time (ms) the "scanning face..." message stays on
+# screen before being replaced by the result. The daemon's cached model and
+# already-open camera can finish an auth check faster than a graphical
+# greeter can render a message, which otherwise looks like a "jump straight
+# to the result" glitch. 0 disables the floor.
+# PAM_MIN_SCAN_DISPLAY_MS=600
 CONF
     fi
     ok "Config installed to $CONFIG_DEST"
@@ -446,8 +482,51 @@ PAMEOF
 }
 
 # ── Enrollment ────────────────────────────────────────────────────────────────
+run_pam_integration_test() {
+  if [ "${SKIP_PAMTEST:-0}" -eq 0 ]; then
+    info "Running PAM integration test ..."
+    if su -s /bin/sh "$USER_NAME" -c \
+        "pamtester facelock-test '${USER_NAME}' authenticate" 2>/dev/null; then
+      ok "PAM face auth test passed!"
+    else
+      warn "PAM test did not pass — non-fatal. Verify manually:"
+      warn "  facelock verify $USER_NAME"
+    fi
+  fi
+}
+
 enroll_user() {
   step "Face enrollment"
+
+  # Data kept from a previous install (uninstaller offers to preserve
+  # /var/lib/facelock) lands here. Previously this function always ran a
+  # fresh enrollment by default, which silently overwrote that preserved
+  # data before it was ever used. Detect it first and ask instead.
+  local data_dir emb_file
+  data_dir="$(get_data_dir)"
+  emb_file="${data_dir}/${USER_NAME}_emb.bin"
+
+  if [ -f "$emb_file" ]; then
+    echo ""
+    hr
+    warn "Existing face data found for '$USER_NAME' (kept from a previous install)."
+    echo    "  [K]eep it   — skip enrollment, reuse the existing data as-is"
+    echo    "  [R]e-enroll — capture fresh samples, overwriting the existing data"
+    hr
+    read -r -p "  Keep or re-enroll? [K/r] " _dchoice
+    _dchoice="${_dchoice:-K}"
+
+    if [[ "$_dchoice" =~ ^[Rr]$ ]]; then
+      info "Re-enrolling — look at the camera ..."
+      facelock reenroll "$USER_NAME"
+      run_pam_integration_test
+    else
+      ok "Keeping existing face data for '$USER_NAME' — skipping enrollment."
+      info "Verify it still works: facelock verify $USER_NAME"
+    fi
+    return
+  fi
+
   echo ""
   hr
   echo -e "  ${BOLD}AstraLock is ready to enroll: ${CYN}$USER_NAME${RST}"
@@ -462,17 +541,7 @@ enroll_user() {
   if [[ "$_reply" =~ ^[Yy]$ ]]; then
     info "Starting enrollment — look at the camera ..."
     facelock enroll "$USER_NAME"
-
-    if [ "${SKIP_PAMTEST:-0}" -eq 0 ]; then
-      info "Running PAM integration test ..."
-      if su -s /bin/sh "$USER_NAME" -c \
-          "pamtester facelock-test '${USER_NAME}' authenticate" 2>/dev/null; then
-        ok "PAM face auth test passed!"
-      else
-        warn "PAM test did not pass — non-fatal. Verify manually:"
-        warn "  facelock verify $USER_NAME"
-      fi
-    fi
+    run_pam_integration_test
   else
     info "Skipped. Enroll when ready:"
     info "  facelock enroll $USER_NAME"
@@ -485,7 +554,7 @@ done_banner() {
   echo -e "${GRN}${BOLD}"
   cat << 'DONE'
 ╔══════════════════════════════════════════════════════════════════╗
-║         AstraLock v3.1  —  Installation Complete  🔓             ║
+║         AstraLock v3.2  —  Installation Complete  🔓             ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Face auth active for: sudo · login · lock screen                ║
 ║                                                                  ║
@@ -494,7 +563,8 @@ done_banner() {
 ║    → Restart after edits: systemctl restart facelockd            ║ 
 ║                                                                  ║
 ║  CLI commands:                                                   ║
-║    facelock enroll <user>   — Enroll face                        ║
+║    facelock enroll <user>   — Enroll face (fails if already set) ║
+║    facelock reenroll <user> — Re-enroll, overwriting old data    ║
 ║    facelock verify <user>   — Direct face check                  ║
 ║    facelock test   <user>   — Full PAM stack test                ║
 ║    facelock list            — Show enrolled users                ║

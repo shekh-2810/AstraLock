@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SOCK="/run/facelock/facelock.sock"
-VERSION="3.0.0"
+VERSION="3.2"
 
 # ── Usage ─────────────────────────────────────────────────────
 usage() {
@@ -13,7 +13,8 @@ usage() {
 AstraLock v${VERSION} — face authentication CLI
 
 Usage:
-  facelock enroll <username>   Enroll face for a user
+  facelock enroll <username>   Enroll face for a user (refuses if data exists)
+  facelock reenroll <username> Re-enroll a user, overwriting existing face data
   facelock verify <username>   Run a face authentication check
   facelock test   <username>   Run PAM stack test via pamtester
   facelock list                List enrolled users
@@ -146,16 +147,18 @@ json_str() {
 
 # ── Commands ──────────────────────────────────────────────────
 
-cmd_enroll() {
-  local user="$1"
+_do_enroll() {
+  # $1 = ipc cmd ("enroll" or "reenroll"), $2 = username
+  local ipc_cmd="$1"
+  local user="$2"
   wait_socket
-  echo "[*] Enrolling face for '${user}' ..."
+  echo "[*] ${ipc_cmd^} face for '${user}' ..."
   echo "    Look at the camera and hold still. Blink naturally."
   echo "    This will take up to 60 seconds."
   echo ""
 
   local result
-  result=$(ipc_send "{\"v\":3,\"cmd\":\"enroll\",\"user\":\"${user}\"}" 90)
+  result=$(ipc_send "{\"v\":3,\"cmd\":\"${ipc_cmd}\",\"user\":\"${user}\"}" 90)
 
   echo "$result" | pretty
 
@@ -180,6 +183,21 @@ cmd_enroll() {
     [ -n "$hint" ] && echo "    ${hint}"
     exit 1
   fi
+}
+
+cmd_enroll() {
+  _do_enroll "enroll" "$1"
+}
+
+cmd_reenroll() {
+  local user="$1"
+  echo "[!] This will overwrite existing face data for '${user}'."
+  read -r -p "    Continue? [y/N] " confirm
+  if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+    echo "[*] Aborted."
+    exit 0
+  fi
+  _do_enroll "reenroll" "$user"
 }
 
 cmd_verify() {
@@ -315,6 +333,10 @@ case "$CMD" in
   enroll)
     [ -z "${2:-}" ] && { echo "Usage: facelock enroll <username>"; exit 1; }
     cmd_enroll "$2"
+    ;;
+  reenroll)
+    [ -z "${2:-}" ] && { echo "Usage: facelock reenroll <username>"; exit 1; }
+    cmd_reenroll "$2"
     ;;
   verify)
     [ -z "${2:-}" ] && { echo "Usage: facelock verify <username>"; exit 1; }

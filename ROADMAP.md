@@ -66,6 +66,31 @@ Dates are intentionally omitted — features ship when stable.
 
 ---
 
+## v3.2 (current)
+
+- **Fixed: data preserved across uninstall/reinstall was silently overwritten.**
+  The installer's enrollment step always ran a fresh enrollment by default;
+  it now detects existing embeddings for the target user first and asks to
+  keep or re-enroll instead of clobbering them automatically.
+- **New `facelock reenroll <user>` command** — explicit, confirmed overwrite
+  of existing face data. Plain `facelock enroll <user>` now refuses (with a
+  hint pointing at `reenroll`) if the user already has saved embeddings,
+  instead of silently overwriting.
+- **Fixed: "scanning face…" PAM message could be replaced by the result
+  before the greeter ever rendered it.** The daemon's cached ONNX session
+  and already-open camera can finish an auth check faster than a graphical
+  greeter paints a PAM_TEXT_INFO message. Added a configurable minimum
+  display floor (`PAM_MIN_SCAN_DISPLAY_MS`, default 600ms) in the PAM
+  module so the scanning message is guaranteed to be visible before it's
+  replaced.
+- **Fixed: ONNX Runtime 1.17.x build failure.** `onnx_wrapper.cpp` used
+  `Session::GetInputNames()`/`GetOutputNames()`, which don't exist on the
+  1.17.3 release the installer downloads. Replaced with the portable
+  `GetInputNameAllocated()`/`GetOutputNameAllocated()` calls.
+- Version bump only — no other behavioral changes.
+
+---
+
 ## Design Philosophy
 
 - Local-first, offline by default

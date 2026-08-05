@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(astralock
-    VERSION 3.0
+    VERSION 3.2
     LANGUAGES C CXX
 )
 

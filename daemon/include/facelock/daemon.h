@@ -86,7 +86,11 @@ private:
 
     bool initialize();
     json handle_request(const json& req);
-    json handle_enroll(const std::string& user);
+    // force=false (cmd "enroll"): refuses to run if the user already has
+    // saved embeddings, so a stray/reflexive re-run never silently
+    // overwrites data (e.g. data kept across an uninstall/reinstall).
+    // force=true  (cmd "reenroll"): explicit, intentional overwrite.
+    json handle_enroll(const std::string& user, bool force);
     json handle_auth(const std::string& user);
     json handle_ping();
     json handle_list();
