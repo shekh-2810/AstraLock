@@ -8,7 +8,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 # ── Version & release config ──────────────────────────────────────────────────
-ASTRALOCK_VERSION="3.2"
+ASTRALOCK_VERSION="3.3"
 RELEASE_BASE="https://github.com/shekh-2810/AstraLock/releases/download/v3.0"
 ONNX_VER="1.17.3"
 REPO_URL="https://github.com/shekh-2810/AstraLock.git"
@@ -52,7 +52,7 @@ get_data_dir() {
 banner() {
   echo -e "${CYN}"
   cat << 'BANNER'
-   ___         __           __              __  
+   ___       __            __             __  
   / _ | ___ / /________ _ / / ___  ____  / /__
  / __ |(_-</ __/ __/ _ `// / / _ \/ __/ /  '_/
 /_/ |_/___/\__/_/  \_,_//_/  \___/\__/ /_/\_\ 
@@ -554,7 +554,7 @@ done_banner() {
   echo -e "${GRN}${BOLD}"
   cat << 'DONE'
 ╔══════════════════════════════════════════════════════════════════╗
-║         AstraLock v3.2  —  Installation Complete  🔓             ║
+║         AstraLock v3.3  —  Installation Complete  🔓             ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Face auth active for: sudo · login · lock screen                ║
 ║                                                                  ║

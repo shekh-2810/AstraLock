@@ -12,7 +12,10 @@ struct CaptureConfig {
     int   camera_device          = 0;
     float detector_confidence    = 0.6f;
     float detector_nms           = 0.3f;
-    bool  liveness_enabled       = true;
+    // NOT YET ENFORCED — reserved for a future anti-spoofing implementation.
+    // grab_aligned_face() does not currently check any of these; a match
+    // is accepted on any detected face regardless of these values.
+    bool  liveness_enabled       = false;
     float liveness_texture_min   = 0.15f;
     int   liveness_blink_frames  = 10;    // frames to observe for blink
     float liveness_ear_threshold = 0.12f; // loosened — 5-pt landmark proxy

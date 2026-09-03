@@ -173,10 +173,12 @@ bool Daemon::initialize()
         return false;
     }
 
-    // Open camera on the main thread and keep it open permanently.
-    // Worker threads (IPC thread pool) cannot open /dev/video* themselves
-    // on cgroup v2 — opening once here on the main thread and sharing the
-    // handle via cap_mtx_ is the correct approach.
+    // Warm-open the camera at startup to pre-init the kernel V4L2 driver
+    // and surface a clear error early if the device is unavailable.
+    // Note: this does NOT keep the camera open — CameraCapture uses an
+    // open-per-request design (see camera.cpp). Each grab_aligned_face()
+    // call opens /dev/videoN, captures, and releases it (LED off when
+    // idle). open_camera()/close_camera() below are compat no-ops.
     if (!pimpl_->camera->open_camera()) {
         spdlog::warn("Camera /dev/video{} unavailable at startup — "
                      "check CAMERA_DEVICE in /etc/facelock/facelock.conf",
@@ -193,7 +195,14 @@ bool Daemon::initialize()
     spdlog::info("Detector:  {}", cfg_.detector_model_path);
     spdlog::info("Threshold: {:.4f} (global fallback)", cfg_.onnx_threshold);
     spdlog::info("Camera:    /dev/video{}", cfg_.camera_device);
-    spdlog::info("Liveness:  {}", cfg_.liveness_enabled ? "enabled" : "disabled");
+    if (cfg_.liveness_enabled) {
+        spdlog::warn("Liveness:  LIVENESS_ENABLED=true in config, but "
+                     "anti-spoofing is not implemented in this build — "
+                     "the setting has no effect. Auth accepts any detected "
+                     "face regardless of this flag.");
+    } else {
+        spdlog::info("Liveness:  disabled (not yet implemented)");
+    }
     return true;
 }
 

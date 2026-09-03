@@ -47,7 +47,9 @@ struct DaemonConfig {
     float enroll_threshold_k    = 1.5f;
 
     // --- Liveness ---
-    bool  liveness_enabled      = true;
+    // NOT YET ENFORCED — see camera.h CaptureConfig comment. Defaults to
+    // false so an unmodified install doesn't log a misleading "enabled".
+    bool  liveness_enabled      = false;
     float liveness_texture_min  = 0.15f;
     int   liveness_blink_frames = 12;
     float liveness_ear_threshold = 0.12f;

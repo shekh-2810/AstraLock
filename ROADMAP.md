@@ -66,7 +66,31 @@ Dates are intentionally omitted — features ship when stable.
 
 ---
 
-## v3.2 (current)
+## v3.3 (current)
+
+- **Fixed: liveness config/logs claimed a working anti-spoofing feature
+  that doesn't exist.** `facelock.conf` shipped with `LIVENESS_ENABLED=true`
+  and comments describing a texture + blink-detection pipeline, and the
+  daemon logged `Liveness: enabled` at startup — but `CameraCapture` never
+  implemented any liveness check; `set_liveness()` was a no-op and
+  `grab_aligned_face()` never evaluated the liveness config fields. Any
+  detected face was accepted regardless of the setting. Default changed to
+  `LIVENESS_ENABLED=false`, config comments now say "not yet enforced," and
+  the daemon logs a `WARN` (not silent) if an existing config explicitly
+  sets it `true`, making clear the flag currently has no effect.
+- Corrected a stale comment in `daemon.cpp` describing camera access as
+  "opened once on the main thread and shared" — the actual design (since an
+  earlier version) is open-per-request in `camera.cpp`. Comment now matches
+  the real implementation.
+- Confirmed `pam_facelock.c`'s JSON field extraction (`pfl_json_get_bool`)
+  is not the vulnerable `strstr()` pattern flagged in earlier planning —
+  it's already key-anchored with boundary validation. No change needed;
+  removed from outstanding-items tracking.
+- Version bump only — no other behavioral changes.
+
+---
+
+## v3.2 (previous)
 
 - **Fixed: data preserved across uninstall/reinstall was silently overwritten.**
   The installer's enrollment step always ran a fresh enrollment by default;

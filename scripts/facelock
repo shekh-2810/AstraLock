@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SOCK="/run/facelock/facelock.sock"
-VERSION="3.2"
+VERSION="3.3"
 
 # ── Usage ─────────────────────────────────────────────────────
 usage() {
