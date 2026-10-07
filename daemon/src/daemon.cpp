@@ -159,6 +159,7 @@ bool Daemon::initialize()
     // --- Camera + RetinaFace detector ---
     CaptureConfig cam_cfg;
     cam_cfg.camera_device          = cfg_.camera_device;
+    cam_cfg.camera_path            = cfg_.camera_path;
     cam_cfg.detector_model_path    = cfg_.detector_model_path;
     cam_cfg.detector_confidence    = cfg_.detector_confidence;
     cam_cfg.detector_nms           = cfg_.detector_nms;
@@ -169,7 +170,8 @@ bool Daemon::initialize()
 
     pimpl_->camera = std::make_unique<CameraCapture>(cam_cfg);
     if (!pimpl_->camera->open()) {
-        spdlog::error("Camera /dev/video{} failed to open", cfg_.camera_device);
+        spdlog::error("Camera {} failed to open",
+                      pimpl_->camera->device_description());
         return false;
     }
 
@@ -177,24 +179,25 @@ bool Daemon::initialize()
     // and surface a clear error early if the device is unavailable.
     // Note: this does NOT keep the camera open — CameraCapture uses an
     // open-per-request design (see camera.cpp). Each grab_aligned_face()
-    // call opens /dev/videoN, captures, and releases it (LED off when
+    // call opens the camera, captures, and releases it (LED off when
     // idle). open_camera()/close_camera() below are compat no-ops.
     if (!pimpl_->camera->open_camera()) {
-        spdlog::warn("Camera /dev/video{} unavailable at startup — "
+        spdlog::warn("Camera {} unavailable at startup — "
                      "check CAMERA_DEVICE in /etc/facelock/facelock.conf",
-                     cfg_.camera_device);
+                     pimpl_->camera->device_description());
         // Non-fatal: daemon starts, auth falls back to password until camera is available
     } else {
         // Settle ISP — called on main thread before worker threads start
         pimpl_->camera->warmup(cfg_.camera_warmup_frames);
-        spdlog::info("camera: /dev/video{} open and warmed", cfg_.camera_device);
+        spdlog::info("camera: {} open and warmed",
+                     pimpl_->camera->device_description());
     }
 
     spdlog::info("AstraLock {} daemon starting", FACELOCK_VERSION_STRING);
     spdlog::info("Model:     {}", cfg_.onnx_model_path);
     spdlog::info("Detector:  {}", cfg_.detector_model_path);
     spdlog::info("Threshold: {:.4f} (global fallback)", cfg_.onnx_threshold);
-    spdlog::info("Camera:    /dev/video{}", cfg_.camera_device);
+    spdlog::info("Camera:    {}", pimpl_->camera->device_description());
     if (cfg_.liveness_enabled) {
         spdlog::warn("Liveness:  LIVENESS_ENABLED=true in config, but "
                      "anti-spoofing is not implemented in this build — "

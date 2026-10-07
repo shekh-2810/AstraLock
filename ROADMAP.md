@@ -66,7 +66,30 @@ Dates are intentionally omitted — features ship when stable.
 
 ---
 
-## v3.3 (current)
+## v3.4 (current)
+
+- **New: persistent camera paths.** `CAMERA_DEVICE` now accepts a udev
+  symlink such as `/dev/v4l/by-id/usb-...-video-index0` as well as a plain
+  index. `/dev/video*` numbers shift when the OBS virtual camera loads or a
+  USB camera re-enumerates (and differ between a login shell and the systemd
+  cgroup), which made auth fail or pick the wrong device. The path is
+  re-resolved on every open, so a camera that comes back under a different
+  number is still found. Numeric `CAMERA_DEVICE=N` keeps working unchanged.
+- The configured path must be under `/dev/` and resolve to a `/dev/video*`
+  node; anything else is rejected immediately (the daemon runs as root and
+  must not be steerable into opening arbitrary files).
+- Camera log lines now show the resolved device and the symlink it came
+  from, and a missing device is reported as such instead of as a generic
+  open failure.
+- Installer's fallback config template no longer shows
+  `LIVENESS_ENABLED=true` (missed in v3.3); installer/config text points at
+  `/dev/v4l/by-id/`.
+- No change to the auth pipeline, IPC protocol, or liveness (still not
+  implemented).
+
+---
+
+## v3.3 (previous)
 
 - **Fixed: liveness config/logs claimed a working anti-spoofing feature
   that doesn't exist.** `facelock.conf` shipped with `LIVENESS_ENABLED=true`

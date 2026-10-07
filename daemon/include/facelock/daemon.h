@@ -38,6 +38,7 @@ struct DaemonConfig {
 
     // --- Camera ---
     int   camera_device         = 0;      // /dev/videoN
+    std::string camera_path;              // persistent path (/dev/v4l/by-id/...); overrides camera_device
 
     // --- Enrollment ---
     int   enroll_target         = 20;     // desired sample count

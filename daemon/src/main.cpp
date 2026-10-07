@@ -104,8 +104,14 @@ static facelock::DaemonConfig load_config(const std::string& path)
         else if (key == "ONNX_THRESHOLD")
             cfg.onnx_threshold = safe_float(value, cfg.onnx_threshold, key);
         // --- Camera ---
-        else if (key == "CAMERA_DEVICE")
-            cfg.camera_device = safe_int(value, cfg.camera_device, key);
+        else if (key == "CAMERA_DEVICE") {
+            // Either a /dev/videoN index (e.g. 0) or a persistent device
+            // path (e.g. /dev/v4l/by-id/usb-...-video-index0).
+            if (!value.empty() && value.front() == '/')
+                cfg.camera_path = value;
+            else
+                cfg.camera_device = safe_int(value, cfg.camera_device, key);
+        }
         // --- Enrollment ---
         else if (key == "ENROLL_TARGET")
             cfg.enroll_target = safe_int(value, cfg.enroll_target, key);
@@ -158,7 +164,8 @@ int main(int argc, char** argv)
     facelock::DaemonConfig cfg = load_config(config_path);
 
     spdlog::info("camera_device={}  threshold={:.4f}  liveness={}  threads={}",
-                 cfg.camera_device,
+                 cfg.camera_path.empty() ? std::to_string(cfg.camera_device)
+                                         : cfg.camera_path,
                  cfg.onnx_threshold,
                  cfg.liveness_enabled ? "on" : "off",
                  cfg.ipc_threads);

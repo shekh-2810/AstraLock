@@ -9,7 +9,12 @@ namespace facelock {
 struct CaptureConfig {
     std::string detector_model_path =
         "/usr/share/facelock/models/retinaface.onnx";
-    int   camera_device          = 0;
+    int   camera_device          = 0;    // /dev/videoN index (used when camera_path is empty)
+    // Persistent device path, e.g. /dev/v4l/by-id/usb-...-video-index0.
+    // When set, takes priority over camera_device and is re-resolved on
+    // every open, so USB re-enumeration or a virtual camera (OBS) shifting
+    // /dev/video* numbers does not break auth.
+    std::string camera_path;
     float detector_confidence    = 0.6f;
     float detector_nms           = 0.3f;
     // NOT YET ENFORCED — reserved for a future anti-spoofing implementation.
@@ -41,6 +46,10 @@ public:
     bool open();
 
     bool is_ready() const;
+
+    // Human-readable description of the configured camera for logs, e.g.
+    // "/dev/video2 (via /dev/v4l/by-id/...)" or "/dev/video0".
+    std::string device_description() const;
 
     // ── Session management ────────────────────────────────────────────────────
     // For enrollment: call open_camera() once, grab_aligned_face() N times,

@@ -6,6 +6,8 @@
 #include <opencv2/videoio.hpp>
 #include <spdlog/spdlog.h>
 
+#include <climits>
+#include <cstdlib>
 #include <chrono>
 #include <mutex>
 #include <thread>
@@ -39,6 +41,32 @@ static cv::Mat align_to_arcface(const cv::Mat& frame,
     cv::warpAffine(frame, aligned, transform, {112,112},
                    cv::INTER_LINEAR, cv::BORDER_REFLECT);
     return aligned;
+}
+
+// ── Persistent camera path resolution (v3.4) ─────────────────────────────────
+//
+//  CAMERA_DEVICE may be a persistent udev symlink such as
+//  /dev/v4l/by-id/usb-...-video-index0.  The kernel's /dev/videoN numbers
+//  are not stable (OBS virtual camera, USB re-enumeration), the symlinks are.
+//  The symlink is resolved on EVERY open attempt, never cached, so a camera
+//  that re-enumerates under a new number is still found.
+//
+//  Safety: this daemon runs as root and feeds the path to VideoCapture, so
+//  the configured path must live under /dev/ and must resolve to a
+//  /dev/video* node — it can never be used to open an arbitrary file.
+enum class PathStatus { ok, missing, invalid };
+
+static PathStatus resolve_camera_path(const std::string& configured,
+                                      std::string& node)
+{
+    if (configured.rfind("/dev/", 0) != 0) return PathStatus::invalid;
+
+    char buf[PATH_MAX];
+    if (!realpath(configured.c_str(), buf)) return PathStatus::missing;
+
+    node = buf;
+    if (node.rfind("/dev/video", 0) != 0) return PathStatus::invalid;
+    return PathStatus::ok;
 }
 
 // ============================================================
@@ -77,24 +105,60 @@ struct CameraCapture::Impl {
         return true;
     }
 
-    // Open VideoCapture using integer index with retry.
+    // Human-readable description of the configured camera, for logs.
+    std::string describe() const {
+        if (cfg.camera_path.empty())
+            return "/dev/video" + std::to_string(cfg.camera_device);
+        std::string node;
+        switch (resolve_camera_path(cfg.camera_path, node)) {
+        case PathStatus::ok:      return node + " (via " + cfg.camera_path + ")";
+        case PathStatus::invalid: return cfg.camera_path + " (invalid camera path)";
+        case PathStatus::missing: break;
+        }
+        return cfg.camera_path + " (not currently present)";
+    }
+
+    // Open VideoCapture with retry. Uses the persistent path if configured
+    // (re-resolved each attempt), otherwise the integer index.
     // Returns an open cap or logs error and returns closed cap.
     cv::VideoCapture open_cap() {
         cv::VideoCapture cap;
         for (int i = 0; i < 6; ++i) {
-            cap.open(cfg.camera_device, cv::CAP_V4L2);
-            if (cap.isOpened()) {
+            bool opened = false;
+
+            if (cfg.camera_path.empty()) {
+                opened = cap.open(cfg.camera_device, cv::CAP_V4L2);
+            } else {
+                std::string node;
+                switch (resolve_camera_path(cfg.camera_path, node)) {
+                case PathStatus::ok:
+                    opened = cap.open(node, cv::CAP_V4L2);
+                    break;
+                case PathStatus::invalid:
+                    // Misconfiguration — retrying cannot help.
+                    spdlog::error("camera: CAMERA_DEVICE '{}' must be a path "
+                                  "under /dev/ that resolves to a /dev/video* "
+                                  "node", cfg.camera_path);
+                    return cap;  // closed
+                case PathStatus::missing:
+                    spdlog::warn("camera: {} does not exist (attempt {}/6) — "
+                                 "camera unplugged or not enumerated yet?",
+                                 cfg.camera_path, i+1);
+                    break;
+                }
+            }
+
+            if (opened && cap.isOpened()) {
                 cap.set(cv::CAP_PROP_FRAME_WIDTH,  640);
                 cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
                 cap.set(cv::CAP_PROP_BUFFERSIZE,   2);
                 return cap;
             }
-            spdlog::warn("camera: open attempt {}/6 on /dev/video{} failed",
-                         i+1, cfg.camera_device);
+            spdlog::warn("camera: open attempt {}/6 on {} failed",
+                         i+1, describe());
             std::this_thread::sleep_for(std::chrono::milliseconds(300));
         }
-        spdlog::error("camera: cannot open /dev/video{} after 6 attempts",
-                      cfg.camera_device);
+        spdlog::error("camera: cannot open {} after 6 attempts", describe());
         return cap;  // closed
     }
 
@@ -122,6 +186,10 @@ bool CameraCapture::open() {
 
 bool CameraCapture::is_ready() const {
     return pimpl_->detector_ready;
+}
+
+std::string CameraCapture::device_description() const {
+    return pimpl_->describe();
 }
 
 // open_camera / close_camera / camera_is_open — stubs kept for API compat

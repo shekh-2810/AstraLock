@@ -8,7 +8,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 # ── Version & release config ──────────────────────────────────────────────────
-ASTRALOCK_VERSION="3.3"
+ASTRALOCK_VERSION="3.4"
 RELEASE_BASE="https://github.com/shekh-2810/AstraLock/releases/download/v3.0"
 ONNX_VER="1.17.3"
 REPO_URL="https://github.com/shekh-2810/AstraLock.git"
@@ -146,7 +146,13 @@ install_deps() {
   case "$PKG_MGR" in
     apt)
       export DEBIAN_FRONTEND=noninteractive
-      apt-get update -qq
+      # A broken THIRD-PARTY repo (expired key, dead URL, e.g. grafana) makes
+      # `apt-get update` exit non-zero even though the distro repos refreshed
+      # fine. Under `set -e` that used to abort the whole install, so warn and
+      # carry on: the install below fails loudly if a package is truly missing.
+      if ! apt-get update -qq; then
+        warn "apt-get update reported errors (usually a broken third-party repo) — continuing with the package lists apt already has"
+      fi
       apt-get install -y \
         git cmake ninja-build g++ \
         libpam0g-dev libaudit-dev \
@@ -334,12 +340,12 @@ write_config() {
 # DATA_DIR=/var/lib/facelock/
 # ONNX_MODEL_PATH=/usr/share/facelock/models/w600k_mbf.onnx
 # DETECTOR_MODEL_PATH=/usr/share/facelock/models/retinaface.onnx
-# CAMERA_DEVICE=0        # run: ls /dev/video* to find yours
+# CAMERA_DEVICE=0        # index (ls /dev/video*) or persistent path (ls -l /dev/v4l/by-id/)
 # ONNX_THRESHOLD=0.30    # global fallback (per-user overrides at enrollment)
 # ENROLL_TARGET=20
 # ENROLL_MIN=10
 # ENROLL_THRESHOLD_K=1.5
-# LIVENESS_ENABLED=true
+# LIVENESS_ENABLED=false  # NOT YET ENFORCED — no anti-spoofing is performed
 # LIVENESS_TEXTURE_MIN=0.15
 # LIVENESS_BLINK_FRAMES=12
 # LIVENESS_EAR_THRESHOLD=0.22
@@ -355,7 +361,8 @@ write_config() {
 CONF
     fi
     ok "Config installed to $CONFIG_DEST"
-    info "  → Set CAMERA_DEVICE=N for your camera  (ls /dev/video*)"
+    info "  → Set CAMERA_DEVICE for your camera: an index (ls /dev/video*) or,"
+    info "    more reliably, a persistent path (ls -l /dev/v4l/by-id/)"
     info "  → Restart after edits: systemctl restart facelockd"
   else
     info "Config already exists — not overwriting ($CONFIG_DEST)"
@@ -554,12 +561,12 @@ done_banner() {
   echo -e "${GRN}${BOLD}"
   cat << 'DONE'
 ╔══════════════════════════════════════════════════════════════════╗
-║         AstraLock v3.3  —  Installation Complete  🔓             ║
+║         AstraLock v3.4  —  Installation Complete  🔓             ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Face auth active for: sudo · login · lock screen                ║
 ║                                                                  ║
 ║  Config:  /etc/facelock/facelock.conf                            ║
-║    → Set CAMERA_DEVICE=N for IR camera  (ls /dev/video*)         ║
+║    → Set CAMERA_DEVICE: index, or /dev/v4l/by-id/... (stable)    ║
 ║    → Restart after edits: systemctl restart facelockd            ║ 
 ║                                                                  ║
 ║  CLI commands:                                                   ║
